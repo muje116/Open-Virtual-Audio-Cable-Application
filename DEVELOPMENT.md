@@ -1,67 +1,85 @@
-# Development Guide
+# 🛠️ Development Guide
 
-## Getting Started
+> Comprehensive guide for contributing to the Virtual Audio Cable project
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
 
-1. **Rust** (required for backend)
-   ```powershell
-   # Windows
-   winget install Rustlang.Rustup
-   
-   # macOS/Linux
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   ```
+| Tool | Purpose |
+|------|---------|
+| **Rust** | Backend compilation |
+| **Node.js** | Frontend runtime |
+| **pnpm** | Package manager |
+| **VS Build Tools** (Windows) | Native compilation |
+| **Xcode CLI** (macOS) | Native compilation |
 
-2. **Node.js** (v18 or higher)
-   ```powershell
-   # Already installed: v22.17.0
-   ```
+### Installing Rust
 
-3. **pnpm**
-   ```powershell
-   npm install -g pnpm
-   ```
+```powershell
+# Windows
+winget install Rustlang.Rustup
 
-4. **Platform-specific dependencies**
-   - Windows: Visual Studio Build Tools
-   - macOS: Xcode Command Line Tools
-   - Linux: libwebkit2gtk and dependencies (see INSTALL.md)
+# macOS/Linux
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
-### Development Workflow
+### Installing Node.js & pnpm
 
-1. **Clone the repository**
-   ```bash
-   cd d:/Projects/VAC
-   ```
+```powershell
+# Node.js should be v18+ (already installed: v22.17.0)
+npm install -g pnpm
+```
 
-2. **Install dependencies**
-   ```bash
-   pnpm install
-   ```
+### Platform-Specific Dependencies
 
-3. **Run in development mode**
-   ```bash
-   pnpm tauri:dev
-   ```
+- **Windows**: Visual Studio Build Tools
+- **macOS**: Xcode Command Line Tools
+- **Linux**: libwebkit2gtk and dependencies (see INSTALL.md)
 
-This will:
-- Start the React dev server (Vite)
-- Compile the Rust backend in debug mode
-- Launch the Tauri application window
-- Enable hot-reload for both frontend and backend
+---
 
-## Project Structure
+## 🔄 Development Workflow
+
+### 1. Clone the Repository
+
+```bash
+cd d:/Projects/VAC
+```
+
+### 2. Install Dependencies
+
+```bash
+pnpm install
+```
+
+### 3. Run in Development Mode
+
+```bash
+pnpm tauri:dev
+```
+
+This command will:
+- ✅ Start the React dev server (Vite) with hot-reload
+- ✅ Compile the Rust backend in debug mode
+- ✅ Launch the Tauri application window
+- ✅ Enable hot-reload for both frontend and backend
+
+---
+
+## 📁 Project Structure
 
 ```
 src/                    # Frontend (React + TypeScript)
 ├── components/         # Reusable UI components
-│   ├── RoutingMatrix.tsx
-│   ├── VuMeter.tsx
-│   ├── DeviceList.tsx
-│   ├── FxChain.tsx
-│   └── Presets.tsx
-├── App.tsx            # Main application
+│   ├── RoutingMatrix.tsx    # N×M routing grid
+│   ├── VuMeter.tsx          # Audio level meters
+│   ├── DeviceList.tsx       # Device selection
+│   ├── FxChain.tsx          # DSP effects UI
+│   └── Presets.tsx          # Preset management
+├── App.tsx            # Main application component
 ├── main.tsx           # React entry point
 └── index.css          # Global styles
 
@@ -70,23 +88,24 @@ src-tauri/             # Backend (Rust)
 │   ├── main.rs        # Application entry point
 │   ├── audio.rs       # Audio capture engine
 │   ├── commands.rs    # Tauri IPC handlers
-│   ├── config.rs      # Configuration
-│   ├── devices.rs     # Device management
-│   ├── dsp.rs         # Audio processing
-│   └── routing.rs     # Routing logic
+│   ├── config.rs      # Configuration management
+│   ├── devices.rs     # Virtual device management
+│   ├── dsp.rs         # Audio processing pipeline
+│   └── routing.rs     # Routing matrix logic
 ├── Cargo.toml         # Rust dependencies
 └── tauri.conf.json    # Tauri configuration
 ```
 
-## Frontend Development
+---
+
+## 🎨 Frontend Development
 
 ### Adding a New Component
 
-1. Create component file in `src/components/`
-2. Import in `App.tsx` or parent component
-3. Add to appropriate tab or section
+1. **Create component file** in `src/components/`
+2. **Import in parent component**
+3. **Add to appropriate tab or section**
 
-Example:
 ```typescript
 // src/components/MyComponent.tsx
 export function MyComponent() {
@@ -127,11 +146,13 @@ useEffect(() => {
 }, []);
 ```
 
-## Backend Development
+---
+
+## 🦀 Backend Development
 
 ### Adding a New Tauri Command
 
-1. Add command function in `src-tauri/src/commands.rs`:
+1. **Add command function** in `src-tauri/src/commands.rs`:
 
 ```rust
 #[tauri::command]
@@ -141,7 +162,7 @@ pub async fn my_command(param: String) -> Result<String, String> {
 }
 ```
 
-2. Register in `src-tauri/src/main.rs`:
+2. **Register in `src-tauri/src/main.rs`**:
 
 ```rust
 .invoke_handler(tauri::generate_handler![
@@ -150,7 +171,7 @@ pub async fn my_command(param: String) -> Result<String, String> {
 ])
 ```
 
-3. Call from frontend:
+3. **Call from frontend**:
 
 ```typescript
 await invoke("my_command", { param: "hello" });
@@ -189,16 +210,21 @@ pub fn process_samples(&self, samples: &[f32]) -> Vec<f32> {
 3. Add UI controls in `src/components/FxChain.tsx`
 4. Wire up via Tauri commands
 
-## Testing
+---
+
+## 🧪 Testing
 
 ### Frontend Testing
 
 ```bash
-# TypeScript check
+# TypeScript type check
 npx tsc --noEmit
 
 # ESLint
 npx eslint src --ext .ts,.tsx
+
+# Format with Prettier
+npx prettier --write src/
 ```
 
 ### Backend Testing
@@ -212,6 +238,9 @@ cargo clippy --manifest-path src-tauri/Cargo.toml
 
 # Run tests
 cargo test --manifest-path src-tauri/Cargo.toml
+
+# Build check
+cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
 ### Manual Testing
@@ -222,7 +251,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 4. Test DSP effects
 5. Test preset save/load
 
-## Debugging
+---
+
+## 🐛 Debugging
 
 ### Frontend Debugging
 
@@ -242,25 +273,16 @@ println!("Debug info: {:?}", data);
 
 ### Common Issues
 
-**Rust not found**
-- Install Rust from https://rustup.rs/
-- Restart terminal after installation
+| Issue | Solution |
+|-------|----------|
+| **Rust not found** | Install Rust from https://rustup.rs/ and restart terminal |
+| **Build errors on Windows** | Install Visual Studio Build Tools, use x64 Native Tools Command Prompt |
+| **Tauri commands fail** | Check console for errors, verify command is registered in `main.rs`, check parameter types |
+| **Audio devices not detected** | Check microphone permissions, verify virtual audio driver is installed, restart application |
 
-**Build errors on Windows**
-- Install Visual Studio Build Tools
-- Use "x64 Native Tools Command Prompt"
+---
 
-**Tauri commands fail**
-- Check console for error messages
-- Verify command is registered in `main.rs`
-- Check parameter types match
-
-**Audio devices not detected**
-- Check microphone permissions
-- Verify virtual audio driver is installed
-- Restart the application
-
-## Building for Production
+## 📦 Building for Production
 
 ### Single Platform
 
@@ -283,21 +305,25 @@ chmod +x scripts/build-linux.sh
 pnpm tauri build
 ```
 
-Output will be in `src-tauri/target/release/bundle/`
+**Output**: `src-tauri/target/release/bundle/`
 
-## Release Process
+---
 
-1. Update version in `src-tauri/Cargo.toml` and `package.json`
-2. Update CHANGELOG.md
-3. Run release preparation script:
+## 🚢 Release Process
+
+1. **Update version** in `src-tauri/Cargo.toml` and `package.json`
+2. **Update CHANGELOG.md**
+3. **Run release preparation script**:
    ```bash
    ./scripts/prepare-release.sh v1.0.0
    ```
-4. Build for all platforms
-5. Create GitHub release with artifacts
-6. Upload release notes
+4. **Build for all platforms**
+5. **Create GitHub release** with artifacts
+6. **Upload release notes**
 
-## Contributing
+---
+
+## 🤝 Contributing
 
 ### Code Style
 
@@ -306,6 +332,8 @@ Output will be in `src-tauri/target/release/bundle/`
 - **Components**: Use functional components with hooks
 
 ### Commit Messages
+
+Follow conventional commits:
 
 ```
 feat: add new feature
@@ -323,7 +351,9 @@ test: add unit tests for DSP
 4. Run linters and tests
 5. Submit pull request with description
 
-## Performance Optimization
+---
+
+## ⚡ Performance Optimization
 
 ### Frontend
 
@@ -335,7 +365,7 @@ test: add unit tests for DSP
 
 - Use lock-free channels for audio
 - Minimize buffer copies
-- Use SIMD for DSP (future)
+- Use SIMD for DSP (future enhancement)
 
 ### Profiling
 
@@ -347,7 +377,9 @@ cargo flamegraph --bin vac
 # Use React DevTools Profiler tab
 ```
 
-## Resources
+---
+
+## 📚 Resources
 
 - [Tauri Documentation](https://tauri.app/v1/guides/)
 - [React Documentation](https://react.dev/)
@@ -355,9 +387,19 @@ cargo flamegraph --bin vac
 - [cpal Documentation](https://docs.rs/cpal/)
 - [dasp Documentation](https://docs.rs/dasp/)
 
-## Getting Help
+---
+
+## 🆘 Getting Help
 
 - Check existing issues on GitHub
-- Read ARCHITECTURE.md for system design
-- Read INSTALL.md for setup issues
-- Read DRIVER_INSTALL.md for driver issues
+- Read [ARCHITECTURE.md](ARCHITECTURE.md) for system design
+- Read [INSTALL.md](INSTALL.md) for setup issues
+- Read [DRIVER_INSTALL.md](DRIVER_INSTALL.md) for driver issues
+
+---
+
+<div align="center">
+
+Happy coding! 🚀
+
+</div>
