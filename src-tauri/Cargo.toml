@@ -1,0 +1,42 @@
+[package]
+name = "vac"
+version = "0.1.0"
+description = "Virtual Audio Cable - Cross-platform audio routing application"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+cpal = "0.15"
+rubato = "0.14"
+dasp = { version = "0.11", features = ["signal", "interpolate", "window", "window-hanning"] }
+symphonia = "0.5"
+anyhow = "1"
+thiserror = "1"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+dirs = "5.0"
+
+# Platform-specific audio
+[target.'cfg(target_os = "macos")'.dependencies]
+coreaudio-rs = "0.11"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = ["Win32_Media_Audio", "Win32_Foundation"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = "0.8"
+libpulse-binding = "2.28"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

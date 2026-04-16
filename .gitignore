@@ -1,11 +1,36 @@
-﻿################################################################################
-# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
-################################################################################
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-/.vs/VAC/CopilotIndices/18.6.39495.22055
-*.bin
-/.vs/VAC.slnx/FileContentIndex
-/.vs/VAC.slnx/v18
-/.vs
-/node_modules
-/src-tauri/target/debug
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Rust
+target/
+Cargo.lock
+
+# Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Presets and config (optional - uncomment if you want to ignore user data)
+# config/
+# presets/
