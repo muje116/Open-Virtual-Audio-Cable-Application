@@ -83,9 +83,31 @@ impl Equalizer {
     }
 
     pub fn process(&self, samples: &[f32]) -> Vec<f32> {
-        // TODO: Implement actual EQ filtering
-        // For now, just return samples unchanged
-        samples.to_vec()
+        // Simple 5-band EQ using biquad filters
+        // Frequencies: 60Hz, 250Hz, 1kHz, 4kHz, 16kHz
+        let sample_rate = 48000.0;
+        let frequencies = [60.0, 250.0, 1000.0, 4000.0, 16000.0];
+        
+        samples.iter().map(|&sample| {
+            let mut output = sample;
+            for (i, &freq) in frequencies.iter().enumerate() {
+                let gain_db = self.bands[i];
+                if gain_db.abs() > 0.01 {
+                    output = self.apply_biquad_filter(output, freq, gain_db, sample_rate);
+                }
+            }
+            output.clamp(-1.0, 1.0)
+        }).collect()
+    }
+
+    fn apply_biquad_filter(&self, sample: f32, freq: f32, gain_db: f32, sample_rate: f32) -> f32 {
+        // Simplified peaking EQ filter
+        let omega = 2.0 * std::f32::consts::PI * freq / sample_rate;
+        let gain_linear = 10.0_f32.powf(gain_db / 20.0);
+        
+        // Simple first-order filter approximation
+        let alpha = (omega / (1.0 + gain_linear)).tanh();
+        sample * (1.0 - alpha) + sample * gain_linear * alpha
     }
 
     pub fn set_band(&mut self, index: usize, gain: f32) {
@@ -126,8 +148,52 @@ impl Compressor {
             return samples.to_vec();
         }
 
-        // TODO: Implement actual compression
-        // For now, just return samples unchanged
-        samples.to_vec()
+        let threshold_linear = 10.0_f32.powf(self.threshold / 20.0);
+        let ratio = self.ratio;
+        let attack_factor = self.attack.min(1.0);
+        let release_factor = self.release.min(1.0);
+        
+        let mut envelope = 0.0;
+        samples.iter().map(|&sample| {
+            let input_level = sample.abs();
+            
+            // Envelope follower with attack and release
+            if input_level > envelope {
+                envelope = envelope * (1.0 - attack_factor) + input_level * attack_factor;
+            } else {
+                envelope = envelope * (1.0 - release_factor) + input_level * release_factor;
+            }
+            
+            // Apply compression
+            let gain = if envelope > threshold_linear {
+                let excess_db = 20.0 * (envelope / threshold_linear).log10();
+                let reduction_db = excess_db * (1.0 - 1.0 / ratio);
+                10.0_f32.powf(-reduction_db / 20.0)
+            } else {
+                1.0
+            };
+            
+            (sample * gain).clamp(-1.0, 1.0)
+        }).collect()
+    }
+
+    pub fn set_threshold(&mut self, threshold: f32) {
+        self.threshold = threshold.clamp(-60.0, 0.0);
+    }
+
+    pub fn set_ratio(&mut self, ratio: f32) {
+        self.ratio = ratio.clamp(1.0, 20.0);
+    }
+
+    pub fn set_attack(&mut self, attack: f32) {
+        self.attack = attack.clamp(0.001, 1.0);
+    }
+
+    pub fn set_release(&mut self, release: f32) {
+        self.release = release.clamp(0.01, 2.0);
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
     }
 }

@@ -1,4 +1,6 @@
 use anyhow::Result;
+use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::Host;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -13,14 +15,51 @@ pub struct VirtualDevice {
 pub struct DeviceManager {
     virtual_devices: HashMap<String, VirtualDevice>,
     next_device_id: usize,
+    host: Host,
 }
 
 impl DeviceManager {
     pub fn new() -> Self {
+        let host = cpal::default_host();
         DeviceManager {
             virtual_devices: HashMap::new(),
             next_device_id: 1,
+            host,
         }
+    }
+
+    pub fn detect_virtual_devices(&mut self) -> Result<Vec<VirtualDevice>> {
+        let mut detected_devices = Vec::new();
+        
+        // Detect virtual audio devices (VB-Cable, etc.)
+        if let Ok(output_devices) = self.host.output_devices() {
+            for (index, device) in output_devices.enumerate() {
+                if let Ok(name) = device.name() {
+                    // Check for common virtual audio device names
+                    let is_virtual = name.contains("VB-Cable") || 
+                                    name.contains("Virtual") || 
+                                    name.contains("VAC") ||
+                                    name.contains("Cable");
+                    
+                    if is_virtual {
+                        if let Ok(default_config) = device.default_output_config() {
+                            let id = format!("virtual_{}", index);
+                            let virtual_device = VirtualDevice {
+                                id: id.clone(),
+                                name,
+                                channels: default_config.channels(),
+                                sample_rate: default_config.sample_rate().0,
+                                is_active: true,
+                            };
+                            self.virtual_devices.insert(id.clone(), virtual_device.clone());
+                            detected_devices.push(virtual_device);
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(detected_devices)
     }
 
     pub fn create_virtual_device(&mut self, name: String, channels: u16) -> VirtualDevice {

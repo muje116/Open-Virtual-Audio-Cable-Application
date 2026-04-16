@@ -33,6 +33,11 @@ async fn main() {
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
+            
+            // Setup system tray (simplified for now)
+            // Full tray integration requires Tauri v2 tray plugin
+            let _ = app;
+            
             Ok(())
         })
         .run(tauri::generate_context!())

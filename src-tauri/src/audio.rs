@@ -1,9 +1,10 @@
 use anyhow::Result;
-use cpal::traits::{DeviceTrait, HostTrait};
-use cpal::{Host};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{Device, Host, SampleFormat, StreamConfig};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::thread;
 use tokio::sync::Mutex as TokioMutex;
 
 #[derive(Debug, Clone)]
@@ -25,9 +26,15 @@ pub enum DeviceType {
 
 pub struct AudioEngine {
     host: Host,
-    active_streams: Arc<TokioMutex<HashMap<String, bool>>>,
+    active_streams: Arc<TokioMutex<HashMap<String, StreamHandle>>>,
     audio_sender: Sender<(String, Vec<f32>)>,
     audio_receiver: Arc<TokioMutex<Receiver<(String, Vec<f32>)>>>,
+}
+
+// Wrapper to handle streams that aren't Send/Sync
+struct StreamHandle {
+    #[allow(dead_code)]
+    thread_handle: thread::JoinHandle<()>,
 }
 
 impl AudioEngine {
@@ -96,19 +103,77 @@ impl AudioEngine {
             .find(|d| d.name().unwrap_or_default().contains(&device_id))
             .ok_or_else(|| anyhow::anyhow!("Device not found"))?;
 
-        let _config = device.default_input_config()?;
-        let _sender = self.audio_sender.clone();
-        let _device_id_clone = device_id.clone();
+        let config = device.default_input_config()?;
+        let sender = self.audio_sender.clone();
+        let device_id_clone = device_id.clone();
 
-        // For now, just mark as active without actually starting the stream
-        // In a real implementatio.await, you'd need to handle the stream differently
-        self.active_streams.lock().await.insert(device_id, true);
+        // Spawn a thread to handle the audio stream
+        let thread_handle = thread::spawn(move || {
+            let device = device;
+            let config = config.clone();
+            
+            let result = match config.sample_format() {
+                SampleFormat::F32 => {
+                    Self::build_and_run_stream::<f32>(&device, &config.into(), sender, device_id_clone)
+                }
+                SampleFormat::I16 => {
+                    Self::build_and_run_stream::<i16>(&device, &config.into(), sender, device_id_clone)
+                }
+                SampleFormat::U16 => {
+                    Self::build_and_run_stream::<u16>(&device, &config.into(), sender, device_id_clone)
+                }
+                _ => Err(anyhow::anyhow!("Unsupported sample format")),
+            };
+
+            if let Err(e) = result {
+                eprintln!("Audio stream error: {}", e);
+            }
+        });
+
+        let handle = StreamHandle { thread_handle };
+        self.active_streams.lock().await.insert(device_id, handle);
 
         Ok(())
     }
 
     pub async fn stop_capture(&self, device_id: String) -> Result<()> {
         self.active_streams.lock().await.remove(&device_id);
+        Ok(())
+    }
+
+    fn build_and_run_stream<T>(
+        device: &Device,
+        config: &StreamConfig,
+        sender: Sender<(String, Vec<f32>)>,
+        device_id: String,
+    ) -> Result<()>
+    where
+        T: cpal::Sample + cpal::SizedSample + Send + 'static,
+        f32: cpal::FromSample<T>,
+    {
+        let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+
+        let stream = device.build_input_stream(
+            config,
+            move |data: &[T], _: &cpal::InputCallbackInfo| {
+                let samples: Vec<f32> = data
+                    .iter()
+                    .map(|&sample| cpal::Sample::from_sample(sample))
+                    .collect();
+
+                if let Err(_) = sender.send((device_id.clone(), samples)) {
+                    eprintln!("Failed to send audio data");
+                }
+            },
+            err_fn,
+            None,
+        )?;
+
+        stream.play()?;
+        
+        // Keep the stream alive
+        std::thread::park();
+        
         Ok(())
     }
 }
