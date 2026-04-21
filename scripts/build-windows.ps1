@@ -33,6 +33,6 @@ pnpm build
 
 # Build Tauri app
 Write-Host "Building Tauri application..."
-pnpm tauri build
+pnpm tauri:build
 
 Write-Host "Build complete! Output is in src-tauri\target\release\bundle\" -ForegroundColor Green
