@@ -143,6 +143,7 @@ This will:
 - ✅ Launch the Tauri application window
 - ✅ Enable hot-reload for both frontend and backend
 
+On Windows, this command auto-loads the Visual Studio C++ toolchain environment before launching Tauri.
 ### Production Build
 
 Build the application for your platform:
@@ -178,8 +179,9 @@ pnpm tauri:build
 
 **Solutions**:
 1. Ensure Visual Studio Build Tools are installed
-2. Run from "x64 Native Tools Command Prompt for VS 2022"
-3. Set environment variable:
+2. Re-run `pnpm tauri:dev` or `pnpm tauri:build` (the scripts auto-initialize `VsDevCmd`)
+3. If auto-detection fails, install the "Desktop development with C++" workload and restart your terminal
+4. Set environment variable:
    ```powershell
    $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
    ```
