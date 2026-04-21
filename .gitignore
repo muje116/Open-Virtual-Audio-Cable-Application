@@ -1,0 +1,10 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs/VAC/CopilotIndices/18.6.39495.22055
+*.bin
+/.vs/VAC.slnx/FileContentIndex
+/.vs/VAC.slnx/v18
+/.vs
+/node_modules
