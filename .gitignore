@@ -8,3 +8,4 @@
 /.vs/VAC.slnx/v18
 /.vs
 /node_modules
+/src-tauri/target/debug
