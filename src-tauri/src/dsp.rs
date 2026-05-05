@@ -1,5 +1,6 @@
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DspProcessor {
     pub gain: f32,
     pub muted: bool,
@@ -64,15 +65,15 @@ impl DspProcessor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Equalizer {
-    pub bands: [f32; 5], // 5-band EQ
+    pub bands: [f32; 5],
 }
 
 impl Default for Equalizer {
     fn default() -> Self {
         Equalizer {
-            bands: [0.0; 5], // Flat response
+            bands: [0.0; 5],
         }
     }
 }
@@ -83,11 +84,9 @@ impl Equalizer {
     }
 
     pub fn process(&self, samples: &[f32]) -> Vec<f32> {
-        // Simple 5-band EQ using biquad filters
-        // Frequencies: 60Hz, 250Hz, 1kHz, 4kHz, 16kHz
         let sample_rate = 48000.0;
         let frequencies = [60.0, 250.0, 1000.0, 4000.0, 16000.0];
-        
+
         samples.iter().map(|&sample| {
             let mut output = sample;
             for (i, &freq) in frequencies.iter().enumerate() {
@@ -101,11 +100,8 @@ impl Equalizer {
     }
 
     fn apply_biquad_filter(&self, sample: f32, freq: f32, gain_db: f32, sample_rate: f32) -> f32 {
-        // Simplified peaking EQ filter
         let omega = 2.0 * std::f32::consts::PI * freq / sample_rate;
         let gain_linear = 10.0_f32.powf(gain_db / 20.0);
-        
-        // Simple first-order filter approximation
         let alpha = (omega / (1.0 + gain_linear)).tanh();
         sample * (1.0 - alpha) + sample * gain_linear * alpha
     }
@@ -117,7 +113,7 @@ impl Equalizer {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Compressor {
     pub threshold: f32,
     pub ratio: f32,
@@ -152,19 +148,17 @@ impl Compressor {
         let ratio = self.ratio;
         let attack_factor = self.attack.min(1.0);
         let release_factor = self.release.min(1.0);
-        
+
         let mut envelope = 0.0;
         samples.iter().map(|&sample| {
             let input_level = sample.abs();
-            
-            // Envelope follower with attack and release
+
             if input_level > envelope {
                 envelope = envelope * (1.0 - attack_factor) + input_level * attack_factor;
             } else {
                 envelope = envelope * (1.0 - release_factor) + input_level * release_factor;
             }
-            
-            // Apply compression
+
             let gain = if envelope > threshold_linear {
                 let excess_db = 20.0 * (envelope / threshold_linear).log10();
                 let reduction_db = excess_db * (1.0 - 1.0 / ratio);
@@ -172,7 +166,7 @@ impl Compressor {
             } else {
                 1.0
             };
-            
+
             (sample * gain).clamp(-1.0, 1.0)
         }).collect()
     }
@@ -195,5 +189,84 @@ impl Compressor {
 
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DspSettings {
+    pub gain: f32,
+    pub noise_gate_enabled: bool,
+    pub noise_gate_threshold: f32,
+    pub eq_bands: [f32; 5],
+    pub compressor_enabled: bool,
+    pub compressor_threshold: f32,
+    pub compressor_ratio: f32,
+    pub compressor_attack: f32,
+    pub compressor_release: f32,
+}
+
+impl Default for DspSettings {
+    fn default() -> Self {
+        DspSettings {
+            gain: 1.0,
+            noise_gate_enabled: false,
+            noise_gate_threshold: -60.0,
+            eq_bands: [0.0; 5],
+            compressor_enabled: false,
+            compressor_threshold: -20.0,
+            compressor_ratio: 4.0,
+            compressor_attack: 0.01,
+            compressor_release: 0.1,
+        }
+    }
+}
+
+impl DspSettings {
+    pub fn to_processor(&self) -> DspProcessor {
+        DspProcessor {
+            gain: self.gain,
+            muted: false,
+            noise_gate_threshold: 10.0_f32.powf(self.noise_gate_threshold / 20.0),
+            noise_gate_enabled: self.noise_gate_enabled,
+        }
+    }
+
+    pub fn to_equalizer(&self) -> Equalizer {
+        Equalizer {
+            bands: self.eq_bands,
+        }
+    }
+
+    pub fn to_compressor(&self) -> Compressor {
+        Compressor {
+            threshold: self.compressor_threshold,
+            ratio: self.compressor_ratio,
+            attack: self.compressor_attack,
+            release: self.compressor_release,
+            enabled: self.compressor_enabled,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DspPipeline {
+    pub processor: DspProcessor,
+    pub equalizer: Equalizer,
+    pub compressor: Compressor,
+}
+
+impl DspPipeline {
+    pub fn from_settings(settings: &DspSettings) -> Self {
+        DspPipeline {
+            processor: settings.to_processor(),
+            equalizer: settings.to_equalizer(),
+            compressor: settings.to_compressor(),
+        }
+    }
+
+    pub fn process(&self, samples: &[f32]) -> Vec<f32> {
+        let samples = self.processor.process(samples);
+        let samples = self.equalizer.process(&samples);
+        self.compressor.process(&samples)
     }
 }

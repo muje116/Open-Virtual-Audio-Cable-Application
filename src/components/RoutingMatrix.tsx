@@ -14,6 +14,7 @@ interface RoutingMatrixProps {
   onRouteToggle: (inputId: string, outputId: string) => void;
   onVolumeChange: (inputId: string, outputId: string, volume: number) => void;
   onMuteToggle: (inputId: string, outputId: string) => void;
+  onAddRoute: () => void;
 }
 
 export function RoutingMatrix({
@@ -23,6 +24,7 @@ export function RoutingMatrix({
   onRouteToggle,
   onVolumeChange,
   onMuteToggle,
+  onAddRoute,
 }: RoutingMatrixProps) {
   const getRoute = (inputId: string, outputId: string) => {
     return routes.find((r) => r.inputId === inputId && r.outputId === outputId);
@@ -32,7 +34,10 @@ export function RoutingMatrix({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Routing Matrix</h3>
-        <button className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors">
+        <button
+          onClick={onAddRoute}
+          className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+        >
           <Plus className="w-4 h-4" />
           Add Route
         </button>

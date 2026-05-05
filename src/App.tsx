@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Settings, Mic, Volume2, Radio, Smartphone, LayoutGrid, Save } from "lucide-react";
 import { RoutingMatrix } from "./components/RoutingMatrix";
@@ -15,11 +15,42 @@ interface Device {
   channels: number;
 }
 
+interface BackendDevice {
+  id: string;
+  name: string;
+  deviceType?: string;
+  device_type?: string;
+  sampleRate?: number;
+  sample_rate?: number;
+  channels: number;
+}
+
 interface Route {
   inputId: string;
   outputId: string;
   volume: number;
   muted: boolean;
+}
+
+interface BackendRoute {
+  inputId?: string;
+  outputId?: string;
+  input_id?: string;
+  output_id?: string;
+  volume: number;
+  muted: boolean;
+}
+
+interface DspSettings {
+  gain: number;
+  noise_gate_enabled: boolean;
+  noise_gate_threshold: number;
+  eq_bands: number[];
+  compressor_enabled: boolean;
+  compressor_threshold: number;
+  compressor_ratio: number;
+  compressor_attack: number;
+  compressor_release: number;
 }
 
 function App() {
@@ -30,21 +61,32 @@ function App() {
   const [selectedInput, setSelectedInput] = useState<string | null>(null);
   const [selectedOutput, setSelectedOutput] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [newDeviceName, setNewDeviceName] = useState("");
+  const [presetNames, setPresetNames] = useState<string[]>([]);
+  const [dspSettings, setDspSettings] = useState<Record<string, DspSettings>>({});
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
-  useEffect(() => {
-    loadDevices();
+  const notify = useCallback((type: "success" | "error", message: string) => {
+    setToast({ type, message });
+    window.setTimeout(() => setToast(null), 2800);
   }, []);
 
-  const loadDevices = async () => {
+  const loadDevices = useCallback(async () => {
     try {
-      const devices = await invoke<Device[]>("get_audio_devices");
-      const inputs = devices.filter((d) => d.deviceType.includes("Microphone") || d.deviceType.includes("Network"));
-      const outputs = devices.filter((d) => d.deviceType.includes("SystemAudio"));
+      const devices = await invoke<BackendDevice[]>("get_audio_devices");
+      const mapped: Device[] = devices.map((d) => ({
+        id: d.id,
+        name: d.name,
+        deviceType: d.deviceType ?? d.device_type ?? "Unknown",
+        sampleRate: d.sampleRate ?? d.sample_rate ?? 48000,
+        channels: d.channels,
+      }));
+      const inputs = mapped.filter((d) => d.deviceType.includes("Microphone") || d.deviceType.includes("Network"));
+      const outputs = mapped.filter((d) => d.deviceType.includes("SystemAudio") || d.deviceType.includes("Virtual"));
       setInputDevices(inputs);
       setOutputDevices(outputs);
     } catch (error) {
       console.error("Failed to load devices:", error);
-      // Set mock data for development when Rust is not available
       setInputDevices([
         { id: "mic_1", name: "Default Microphone", deviceType: "Microphone", sampleRate: 48000, channels: 2 },
         { id: "sys_1", name: "System Audio", deviceType: "SystemAudio", sampleRate: 48000, channels: 2 },
@@ -56,31 +98,206 @@ function App() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const handleRouteToggle = (inputId: string, outputId: string) => {
+  const loadRoutes = useCallback(async () => {
+    try {
+      const backendRoutes = await invoke<BackendRoute[]>("get_routes");
+      setRoutes(
+        backendRoutes.map((r) => ({
+          inputId: r.inputId ?? r.input_id ?? "",
+          outputId: r.outputId ?? r.output_id ?? "",
+          volume: r.volume,
+          muted: r.muted,
+        }))
+      );
+    } catch (error) {
+      console.error("Failed to load routes:", error);
+      notify("error", "Failed to load routes");
+    }
+  }, [notify]);
+
+  const loadPresets = useCallback(async () => {
+    try {
+      const names = await invoke<string[]>("get_presets");
+      setPresetNames(names);
+    } catch (error) {
+      console.error("Failed to load presets:", error);
+      notify("error", "Failed to load presets");
+    }
+  }, [notify]);
+
+  const loadDspSettings = useCallback(async (deviceId: string) => {
+    try {
+      const settings = await invoke<DspSettings>("get_device_dsp", { device_id: deviceId });
+      setDspSettings((prev) => ({ ...prev, [deviceId]: settings }));
+    } catch {
+      // No DSP config yet — that's fine
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDevices();
+    loadRoutes();
+    loadPresets();
+  }, [loadDevices, loadRoutes, loadPresets]);
+
+  useEffect(() => {
+    if (routes.length > 0) {
+      loadDspSettings(routes[0].inputId);
+    }
+  }, [routes, loadDspSettings]);
+
+  const handleRouteToggle = async (inputId: string, outputId: string) => {
     const existingRoute = routes.find((r) => r.inputId === inputId && r.outputId === outputId);
     if (existingRoute) {
-      setRoutes(routes.filter((r) => r !== existingRoute));
+      try {
+        await invoke("remove_route", { input_id: inputId, output_id: outputId });
+        setRoutes(routes.filter((r) => r !== existingRoute));
+      } catch (error) {
+        console.error("Failed to remove route:", error);
+        notify("error", "Failed to remove route");
+      }
     } else {
-      setRoutes([...routes, { inputId, outputId, volume: 100, muted: false }]);
+      try {
+        await invoke("set_route", { input_id: inputId, output_id: outputId, volume: 100, muted: false });
+        setRoutes([...routes, { inputId, outputId, volume: 100, muted: false }]);
+      } catch (error) {
+        console.error("Failed to set route:", error);
+        notify("error", "Failed to set route");
+      }
     }
   };
 
-  const handleVolumeChange = (inputId: string, outputId: string, volume: number) => {
+  const handleVolumeChange = async (inputId: string, outputId: string, volume: number) => {
     setRoutes(
       routes.map((r) =>
         r.inputId === inputId && r.outputId === outputId ? { ...r, volume } : r
       )
     );
+    try {
+      await invoke("set_volume", { input_id: inputId, output_id: outputId, volume });
+    } catch (error) {
+      console.error("Failed to set volume:", error);
+      notify("error", "Failed to update volume");
+    }
   };
 
-  const handleMuteToggle = (inputId: string, outputId: string) => {
+  const handleMuteToggle = async (inputId: string, outputId: string) => {
+    const route = routes.find((r) => r.inputId === inputId && r.outputId === outputId);
+    if (!route) return;
+    const newMuted = !route.muted;
     setRoutes(
       routes.map((r) =>
-        r.inputId === inputId && r.outputId === outputId ? { ...r, muted: !r.muted } : r
+        r.inputId === inputId && r.outputId === outputId ? { ...r, muted: newMuted } : r
       )
     );
+    try {
+      await invoke("set_mute", { input_id: inputId, output_id: outputId, muted: newMuted });
+    } catch (error) {
+      console.error("Failed to set mute:", error);
+      notify("error", "Failed to update mute");
+    }
+  };
+
+  const handleCreateDevice = async () => {
+    if (!newDeviceName.trim()) return;
+    try {
+      await invoke("create_virtual_device", { name: newDeviceName, channels: 2 });
+      setNewDeviceName("");
+      await loadDevices();
+    } catch (error) {
+      console.error("Failed to create device:", error);
+      notify("error", "Failed to create virtual device");
+    }
+  };
+
+  const handleSavePreset = async (name: string) => {
+    try {
+      await invoke("save_preset", { name });
+      await loadPresets();
+      notify("success", `Preset saved: ${name}`);
+    } catch (error) {
+      console.error("Failed to save preset:", error);
+      notify("error", "Failed to save preset");
+    }
+  };
+
+  const handleLoadPreset = async (name: string) => {
+    try {
+      const preset = await invoke<{ name: string; routes: BackendRoute[] }>("load_preset", { name });
+      setRoutes(
+        preset.routes.map((r) => ({
+          inputId: r.inputId ?? r.input_id ?? "",
+          outputId: r.outputId ?? r.output_id ?? "",
+          volume: r.volume,
+          muted: r.muted,
+        }))
+      );
+      await loadDevices();
+      notify("success", `Preset loaded: ${name}`);
+    } catch (error) {
+      console.error("Failed to load preset:", error);
+      notify("error", "Failed to load preset");
+    }
+  };
+
+  const handleDeletePreset = async (name: string) => {
+    try {
+      await invoke("delete_preset", { name });
+      await loadPresets();
+      notify("success", `Preset deleted: ${name}`);
+    } catch (error) {
+      console.error("Failed to delete preset:", error);
+      notify("error", "Failed to delete preset");
+    }
+  };
+
+  const handleExportPreset = async (name: string) => {
+    try {
+      const presetJson = await invoke<string>("export_preset", { name });
+      const blob = new Blob([presetJson], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${name}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      notify("success", `Preset exported: ${name}`);
+    } catch (error) {
+      console.error("Failed to export preset:", error);
+      notify("error", "Failed to export preset");
+    }
+  };
+
+  const handleImportPreset = async (file: File) => {
+    try {
+      const presetJson = await file.text();
+      const name = await invoke<string>("import_preset", { presetJson });
+      await loadPresets();
+      notify("success", `Preset imported: ${name}`);
+    } catch (error) {
+      console.error("Failed to import preset:", error);
+      notify("error", "Failed to import preset");
+    }
+  };
+
+  const handleDspChange = async (deviceId: string, settings: DspSettings) => {
+    setDspSettings((prev) => ({ ...prev, [deviceId]: settings }));
+    try {
+      await invoke("set_device_dsp", { device_id: deviceId, settings });
+    } catch (error) {
+      console.error("Failed to set DSP:", error);
+      notify("error", "Failed to apply DSP settings");
+    }
+  };
+
+  const handleAddRoute = () => {
+    if (inputDevices.length > 0 && outputDevices.length > 0) {
+      const inputId = selectedInput || inputDevices[0].id;
+      const outputId = selectedOutput || outputDevices[0].id;
+      handleRouteToggle(inputId, outputId);
+    }
   };
 
   return (
@@ -176,6 +393,7 @@ function App() {
                   onRouteToggle={handleRouteToggle}
                   onVolumeChange={handleVolumeChange}
                   onMuteToggle={handleMuteToggle}
+                  onAddRoute={handleAddRoute}
                 />
 
                 <div className="grid grid-cols-3 gap-6">
@@ -249,10 +467,16 @@ function App() {
               <div className="flex gap-4">
                 <input
                   type="text"
+                  value={newDeviceName}
+                  onChange={(e) => setNewDeviceName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateDevice()}
                   placeholder="Device name (e.g., VAC-4)"
                   className="flex-1 px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none"
                 />
-                <button className="px-6 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors">
+                <button
+                  onClick={handleCreateDevice}
+                  className="px-6 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+                >
                   Create
                 </button>
               </div>
@@ -264,7 +488,11 @@ function App() {
           <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
             <h2 className="text-xl font-semibold mb-4">FX Chain Editor</h2>
             {routes.length > 0 ? (
-              <FxChain routeId={routes[0].inputId} />
+              <FxChain
+                routeId={routes[0].inputId}
+                onDspChange={(settings) => handleDspChange(routes[0].inputId, settings)}
+                initialSettings={dspSettings[routes[0].inputId]}
+              />
             ) : (
               <p className="text-gray-400">Create a route first to configure its FX chain.</p>
             )}
@@ -273,7 +501,14 @@ function App() {
 
         {activeTab === "presets" && (
           <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-            <Presets />
+            <Presets
+              presets={presetNames}
+              onSave={handleSavePreset}
+              onLoad={handleLoadPreset}
+              onDelete={handleDeletePreset}
+              onExport={handleExportPreset}
+              onImport={handleImportPreset}
+            />
           </div>
         )}
 
@@ -283,10 +518,8 @@ function App() {
             <div className="space-y-4">
               <p className="text-gray-400">Pair with mobile app to use phone microphone as input source.</p>
               <div className="bg-gray-700 rounded-lg p-6 text-center">
-                <div className="w-32 h-32 mx-auto mb-4 bg-gray-600 rounded-lg flex items-center justify-center">
-                  <QrCodePlaceholder />
-                </div>
-                <p className="text-sm text-gray-400">Scan QR code with mobile app to pair</p>
+                <QrCodePlaceholder />
+                <p className="text-sm text-gray-400 mt-4">Scan QR code with mobile app to pair</p>
               </div>
             </div>
           </div>
@@ -302,7 +535,7 @@ function App() {
                   <option value="64">64 samples (lowest latency)</option>
                   <option value="128">128 samples</option>
                   <option value="256">256 samples</option>
-                  <option value="512" selected>512 samples (recommended)</option>
+                  <option value="512">512 samples (recommended)</option>
                   <option value="1024">1024 samples</option>
                   <option value="2048">2048 samples (highest stability)</option>
                 </select>
@@ -311,14 +544,14 @@ function App() {
                 <label className="block text-sm font-medium text-gray-300 mb-2">Sample Rate</label>
                 <select className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none">
                   <option value="44100">44.1 kHz</option>
-                  <option value="48000" selected>48 kHz</option>
+                  <option value="48000">48 kHz</option>
                   <option value="96000">96 kHz</option>
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Theme</label>
                 <select className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none">
-                  <option value="dark" selected>Dark</option>
+                  <option value="dark">Dark</option>
                   <option value="light">Light</option>
                   <option value="system">System</option>
                 </select>
@@ -336,18 +569,32 @@ function App() {
           </div>
         )}
       </main>
+
+      {toast && (
+        <div className="fixed right-5 top-5 z-50">
+          <div
+            className={`px-4 py-3 rounded-lg border shadow-lg ${
+              toast.type === "success"
+                ? "bg-emerald-600/95 border-emerald-400 text-white"
+                : "bg-red-600/95 border-red-400 text-white"
+            }`}
+          >
+            {toast.message}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function QrCodePlaceholder() {
   return (
-    <div className="w-24 h-24 bg-white rounded grid grid-cols-5 grid-rows-5 gap-0.5 p-2">
+    <div className="w-24 h-24 bg-white rounded grid grid-cols-5 grid-rows-5 gap-0.5 p-2 mx-auto">
       {Array.from({ length: 25 }).map((_, i) => (
         <div
           key={i}
           className={`rounded-sm ${
-            (i === 0 || i === 1 || i === 4 || i === 5 || i === 6 || i === 9 || i === 10 || 
+            (i === 0 || i === 1 || i === 4 || i === 5 || i === 6 || i === 9 || i === 10 ||
              i === 14 || i === 15 || i === 16 || i === 19 || i === 20 || i === 24)
               ? "bg-black"
               : "bg-gray-200"

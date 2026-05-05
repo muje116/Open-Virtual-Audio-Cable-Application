@@ -1,16 +1,81 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sliders, Gauge, Zap } from "lucide-react";
+
+interface DspSettings {
+  gain: number;
+  noise_gate_enabled: boolean;
+  noise_gate_threshold: number;
+  eq_bands: number[];
+  compressor_enabled: boolean;
+  compressor_threshold: number;
+  compressor_ratio: number;
+  compressor_attack: number;
+  compressor_release: number;
+}
 
 interface FxChainProps {
   routeId: string;
+  initialSettings?: DspSettings;
+  onDspChange: (settings: DspSettings) => void;
 }
 
-export function FxChain({ }: FxChainProps) {
-  const [gain, setGain] = useState(100);
-  const [noiseGateEnabled, setNoiseGateEnabled] = useState(false);
-  const [noiseGateThreshold, setNoiseGateThreshold] = useState(-60);
-  const [eqBands, setEqBands] = useState([0, 0, 0, 0, 0]);
-  const [compressorEnabled, setCompressorEnabled] = useState(false);
+const defaultSettings: DspSettings = {
+  gain: 1,
+  noise_gate_enabled: false,
+  noise_gate_threshold: -60,
+  eq_bands: [0, 0, 0, 0, 0],
+  compressor_enabled: false,
+  compressor_threshold: -20,
+  compressor_ratio: 4,
+  compressor_attack: 0.01,
+  compressor_release: 0.1,
+};
+
+export function FxChain({ routeId, initialSettings, onDspChange }: FxChainProps) {
+  const merged = initialSettings ?? defaultSettings;
+  const [gain, setGain] = useState(Math.round(merged.gain * 100));
+  const [noiseGateEnabled, setNoiseGateEnabled] = useState(merged.noise_gate_enabled);
+  const [noiseGateThreshold, setNoiseGateThreshold] = useState(merged.noise_gate_threshold);
+  const [eqBands, setEqBands] = useState(merged.eq_bands);
+  const [compressorEnabled, setCompressorEnabled] = useState(merged.compressor_enabled);
+  const [compressorThreshold, setCompressorThreshold] = useState(merged.compressor_threshold);
+  const [compressorRatio, setCompressorRatio] = useState(merged.compressor_ratio);
+
+  useEffect(() => {
+    const next = initialSettings ?? defaultSettings;
+    setGain(Math.round(next.gain * 100));
+    setNoiseGateEnabled(next.noise_gate_enabled);
+    setNoiseGateThreshold(next.noise_gate_threshold);
+    setEqBands(next.eq_bands);
+    setCompressorEnabled(next.compressor_enabled);
+    setCompressorThreshold(next.compressor_threshold);
+    setCompressorRatio(next.compressor_ratio);
+  }, [routeId, initialSettings]);
+
+  useEffect(() => {
+    const next: DspSettings = {
+      gain: gain / 100,
+      noise_gate_enabled: noiseGateEnabled,
+      noise_gate_threshold: noiseGateThreshold,
+      eq_bands: eqBands,
+      compressor_enabled: compressorEnabled,
+      compressor_threshold: compressorThreshold,
+      compressor_ratio: compressorRatio,
+      compressor_attack: 0.01,
+      compressor_release: 0.1,
+    };
+    onDspChange(next);
+  }, [
+    routeId,
+    gain,
+    noiseGateEnabled,
+    noiseGateThreshold,
+    eqBands,
+    compressorEnabled,
+    compressorThreshold,
+    compressorRatio,
+    onDspChange,
+  ]);
 
   return (
     <div className="space-y-6">
@@ -19,7 +84,6 @@ export function FxChain({ }: FxChainProps) {
         <h3 className="text-lg font-semibold">FX Chain</h3>
       </div>
 
-      {/* Gain */}
       <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
         <div className="flex items-center gap-2 mb-3">
           <Gauge className="w-4 h-4 text-primary-400" />
@@ -31,7 +95,7 @@ export function FxChain({ }: FxChainProps) {
             min="0"
             max="200"
             value={gain}
-            onChange={(e) => setGain(parseInt(e.target.value))}
+            onChange={(e) => setGain(parseInt(e.target.value, 10))}
             className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
           />
           <div className="flex justify-between text-sm text-gray-400">
@@ -42,7 +106,6 @@ export function FxChain({ }: FxChainProps) {
         </div>
       </div>
 
-      {/* Noise Gate */}
       <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -52,9 +115,7 @@ export function FxChain({ }: FxChainProps) {
           <button
             onClick={() => setNoiseGateEnabled(!noiseGateEnabled)}
             className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              noiseGateEnabled
-                ? "bg-primary-600 text-white"
-                : "bg-gray-700 text-gray-400"
+              noiseGateEnabled ? "bg-primary-600 text-white" : "bg-gray-700 text-gray-400"
             }`}
           >
             {noiseGateEnabled ? "ON" : "OFF"}
@@ -68,17 +129,14 @@ export function FxChain({ }: FxChainProps) {
               min="-100"
               max="0"
               value={noiseGateThreshold}
-              onChange={(e) => setNoiseGateThreshold(parseInt(e.target.value))}
+              onChange={(e) => setNoiseGateThreshold(parseInt(e.target.value, 10))}
               className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
             />
-            <div className="text-center text-sm text-gray-400">
-              {noiseGateThreshold} dB
-            </div>
+            <div className="text-center text-sm text-gray-400">{noiseGateThreshold} dB</div>
           </div>
         )}
       </div>
 
-      {/* Equalizer */}
       <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
         <div className="flex items-center gap-2 mb-3">
           <Sliders className="w-4 h-4 text-primary-400" />
@@ -87,34 +145,26 @@ export function FxChain({ }: FxChainProps) {
         <div className="grid grid-cols-5 gap-4">
           {["60Hz", "250Hz", "1kHz", "4kHz", "16kHz"].map((freq, index) => (
             <div key={freq} className="space-y-2">
-              <label className="text-xs text-gray-400 block text-center">
-                {freq}
-              </label>
+              <label className="text-xs text-gray-400 block text-center">{freq}</label>
               <input
                 type="range"
                 min="-12"
                 max="12"
                 value={eqBands[index]}
                 onChange={(e) => {
-                  const newBands = [...eqBands];
-                  newBands[index] = parseInt(e.target.value);
-                  setEqBands(newBands);
+                  const next = [...eqBands];
+                  next[index] = parseInt(e.target.value, 10);
+                  setEqBands(next);
                 }}
                 className="w-full h-20 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
-                style={{
-                  writingMode: "vertical-lr",
-                  direction: "rtl",
-                }}
+                style={{ writingMode: "vertical-lr", direction: "rtl" }}
               />
-              <div className="text-center text-xs text-gray-400">
-                {eqBands[index]} dB
-              </div>
+              <div className="text-center text-xs text-gray-400">{eqBands[index]} dB</div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Compressor */}
       <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -124,9 +174,7 @@ export function FxChain({ }: FxChainProps) {
           <button
             onClick={() => setCompressorEnabled(!compressorEnabled)}
             className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-              compressorEnabled
-                ? "bg-primary-600 text-white"
-                : "bg-gray-700 text-gray-400"
+              compressorEnabled ? "bg-primary-600 text-white" : "bg-gray-700 text-gray-400"
             }`}
           >
             {compressorEnabled ? "ON" : "OFF"}
@@ -140,7 +188,8 @@ export function FxChain({ }: FxChainProps) {
                 type="range"
                 min="-60"
                 max="0"
-                defaultValue="-20"
+                value={compressorThreshold}
+                onChange={(e) => setCompressorThreshold(parseInt(e.target.value, 10))}
                 className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
               />
             </div>
@@ -150,7 +199,8 @@ export function FxChain({ }: FxChainProps) {
                 type="range"
                 min="1"
                 max="20"
-                defaultValue="4"
+                value={compressorRatio}
+                onChange={(e) => setCompressorRatio(parseInt(e.target.value, 10))}
                 className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
               />
             </div>
