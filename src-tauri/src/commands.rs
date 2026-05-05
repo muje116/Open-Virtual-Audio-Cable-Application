@@ -80,7 +80,7 @@ fn find_route_id(inner: &InnerState, input_id: &str, output_id: &str) -> Option<
 
 #[tauri::command]
 pub async fn get_audio_devices(state: State<'_, crate::AppState>) -> Result<Vec<AudioDeviceInfo>, String> {
-    let inner = state.0.lock().await;
+    let inner = state.inner().0.lock().await;
 
     let mut devices = Vec::new();
 
@@ -126,7 +126,7 @@ pub async fn start_audio_capture(
     device_id: String,
     state: State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let inner = state.0.lock().await;
+    let inner = state.inner().0.lock().await;
     inner
         .audio_engine
         .start_capture(device_id)
@@ -139,7 +139,7 @@ pub async fn stop_audio_capture(
     device_id: String,
     state: State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let inner = state.0.lock().await;
+    let inner = state.inner().0.lock().await;
     inner
         .audio_engine
         .stop_capture(device_id)
@@ -153,7 +153,7 @@ pub async fn create_virtual_device(
     channels: u16,
     state: State<'_, crate::AppState>,
 ) -> Result<String, String> {
-    let mut inner = state.0.lock().await;
+    let mut inner = state.inner().0.lock().await;
     let device = inner.device_manager.create_virtual_device(name, channels);
     Ok(device.id)
 }
@@ -163,7 +163,7 @@ pub async fn delete_virtual_device(
     device_id: String,
     state: State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let mut inner = state.0.lock().await;
+    let mut inner = state.inner().0.lock().await;
     inner
         .device_manager
         .delete_virtual_device(&device_id)
@@ -178,7 +178,7 @@ pub async fn set_route(
     muted: bool,
     state: State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let mut inner = state.0.lock().await;
+    let mut inner = state.inner().0.lock().await;
     let input_id_copy = input_id.clone();
     let output_id_copy = output_id.clone();
     inner.routing_matrix.add_route(input_id, output_id);
@@ -193,6 +193,20 @@ pub async fn set_route(
         r.muted = muted;
         inner.routing_matrix.update_route(r).map_err(|e| e.to_string())?;
     }
+    let all_routes = inner.routing_matrix.get_all_routes();
+    inner
+        .audio_engine
+        .sync_routes(all_routes)
+        .map_err(|e| e.to_string())?;
+    inner
+        .audio_engine
+        .start_capture(input_id_copy)
+        .await
+        .map_err(|e| {
+            eprintln!("start_capture warning for route add: {}", e);
+            e.to_string()
+        })
+        .ok();
     Ok(())
 }
 
@@ -202,16 +216,30 @@ pub async fn remove_route(
     output_id: String,
     state: State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let mut inner = state.0.lock().await;
+    let mut inner = state.inner().0.lock().await;
     if let Some(route_id) = find_route_id(&inner, &input_id, &output_id) {
         inner.routing_matrix.remove_route(&route_id);
+    }
+    let all_routes = inner.routing_matrix.get_all_routes();
+    inner
+        .audio_engine
+        .sync_routes(all_routes)
+        .map_err(|e| e.to_string())?;
+
+    let has_input_routes = inner
+        .routing_matrix
+        .get_all_routes()
+        .iter()
+        .any(|r| r.input_id == input_id);
+    if !has_input_routes {
+        let _ = inner.audio_engine.stop_capture(input_id).await;
     }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn get_routes(state: State<'_, crate::AppState>) -> Result<Vec<Route>, String> {
-    let inner = state.0.lock().await;
+    let inner = state.inner().0.lock().await;
     let routes = inner.routing_matrix.get_all_routes();
     Ok(convert_routes(&routes))
 }
@@ -223,7 +251,7 @@ pub async fn set_volume(
     volume: f32,
     state: State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let mut inner = state.0.lock().await;
+    let mut inner = state.inner().0.lock().await;
     if let Some(route_id) = find_route_id(&inner, &input_id, &output_id) {
         if let Some(route) = inner.routing_matrix.get_route(&route_id) {
             let mut r = route.clone();
@@ -231,6 +259,11 @@ pub async fn set_volume(
             inner.routing_matrix.update_route(r).map_err(|e| e.to_string())?;
         }
     }
+    let all_routes = inner.routing_matrix.get_all_routes();
+    inner
+        .audio_engine
+        .sync_routes(all_routes)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -241,7 +274,7 @@ pub async fn set_mute(
     muted: bool,
     state: State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let mut inner = state.0.lock().await;
+    let mut inner = state.inner().0.lock().await;
     if let Some(route_id) = find_route_id(&inner, &input_id, &output_id) {
         if let Some(route) = inner.routing_matrix.get_route(&route_id) {
             let mut r = route.clone();
@@ -249,6 +282,11 @@ pub async fn set_mute(
             inner.routing_matrix.update_route(r).map_err(|e| e.to_string())?;
         }
     }
+    let all_routes = inner.routing_matrix.get_all_routes();
+    inner
+        .audio_engine
+        .sync_routes(all_routes)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -258,7 +296,7 @@ pub async fn set_device_dsp(
     settings: DspSettings,
     state: State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let inner = state.0.lock().await;
+    let inner = state.inner().0.lock().await;
     inner
         .audio_engine
         .set_device_dsp(&device_id, settings)
@@ -270,7 +308,7 @@ pub async fn get_device_dsp(
     device_id: String,
     state: State<'_, crate::AppState>,
 ) -> Result<DspSettings, String> {
-    let inner = state.0.lock().await;
+    let inner = state.inner().0.lock().await;
     inner
         .audio_engine
         .get_device_dsp(&device_id)
@@ -282,7 +320,7 @@ pub async fn save_preset(
     name: String,
     state: State<'_, crate::AppState>,
 ) -> Result<(), String> {
-    let inner = state.0.lock().await;
+    let inner = state.inner().0.lock().await;
 
     let routes = convert_routes(&inner.routing_matrix.get_all_routes());
 
@@ -314,7 +352,7 @@ pub async fn load_preset(
     let preset: Preset = serde_json::from_str(&json).map_err(|e| e.to_string())?;
 
     // Restore into state
-    let mut inner = state.0.lock().await;
+    let mut inner = state.inner().0.lock().await;
     inner.routing_matrix.clear();
     for r in &preset.routes {
         let mut route = inner.routing_matrix.add_route(r.input_id.clone(), r.output_id.clone());
@@ -325,6 +363,12 @@ pub async fn load_preset(
             .update_route(route)
             .map_err(|e| e.to_string())?;
     }
+    let all_routes = inner.routing_matrix.get_all_routes();
+    inner
+        .audio_engine
+        .sync_routes(all_routes)
+        .map_err(|e| e.to_string())?;
+
     for (device_id, settings) in &preset.dsp_settings {
         inner
             .audio_engine

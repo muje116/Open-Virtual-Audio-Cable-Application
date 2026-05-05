@@ -81,7 +81,12 @@ function App() {
         sampleRate: d.sampleRate ?? d.sample_rate ?? 48000,
         channels: d.channels,
       }));
-      const inputs = mapped.filter((d) => d.deviceType.includes("Microphone") || d.deviceType.includes("Network"));
+      const inputs = mapped.filter(
+        (d) =>
+          d.deviceType.includes("Microphone") ||
+          d.deviceType.includes("Network") ||
+          d.id === "loopback_default"
+      );
       const outputs = mapped.filter((d) => d.deviceType.includes("SystemAudio") || d.deviceType.includes("Virtual"));
       setInputDevices(inputs);
       setOutputDevices(outputs);
@@ -300,6 +305,8 @@ function App() {
     }
   };
 
+  const loopbackActive = routes.some((r) => r.inputId === "loopback_default");
+
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
@@ -307,6 +314,11 @@ function App() {
           <div className="flex items-center gap-3">
             <Radio className="w-8 h-8 text-primary-500" />
             <h1 className="text-2xl font-bold">Virtual Audio Cable</h1>
+            {loopbackActive && (
+              <span className="px-2 py-1 text-xs rounded-md bg-emerald-700/70 border border-emerald-400/50 text-emerald-100">
+                Loopback Active
+              </span>
+            )}
           </div>
           <nav className="flex gap-2">
             <button
