@@ -53,6 +53,34 @@ interface DspSettings {
   compressor_release: number;
 }
 
+interface RouteSignalActivity {
+  key: string;
+  input_id: string;
+  output_id: string;
+  packets: number;
+  samples: number;
+  last_activity_ms: number;
+}
+
+interface RuntimeDiagnostics {
+  active_capture_sources: string[];
+  active_output_streams: string[];
+  route_signal_activity: RouteSignalActivity[];
+}
+
+interface AppConfig {
+  buffer_size: number;
+  sample_rate: number;
+  default_preset: string | null;
+  start_minimized: boolean;
+  theme: string;
+}
+
+const formatLastUpdated = (ms: number) => {
+  if (!ms) return "never";
+  return new Date(ms).toLocaleTimeString();
+};
+
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [inputDevices, setInputDevices] = useState<Device[]>([]);
@@ -64,6 +92,11 @@ function App() {
   const [newDeviceName, setNewDeviceName] = useState("");
   const [presetNames, setPresetNames] = useState<string[]>([]);
   const [dspSettings, setDspSettings] = useState<Record<string, DspSettings>>({});
+  const [diagnostics, setDiagnostics] = useState<RuntimeDiagnostics | null>(null);
+  const [diagnosticsUpdatedAt, setDiagnosticsUpdatedAt] = useState<number>(0);
+  const [staleThresholdSec, setStaleThresholdSec] = useState<number>(5);
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [selectedFxRoute, setSelectedFxRoute] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const notify = useCallback((type: "success" | "error", message: string) => {
@@ -122,6 +155,15 @@ function App() {
     }
   }, [notify]);
 
+  const loadConfig = useCallback(async () => {
+    try {
+      const cfg = await invoke<AppConfig>("get_config");
+      setConfig(cfg);
+    } catch {
+      // Config not available in mock mode
+    }
+  }, []);
+
   const loadPresets = useCallback(async () => {
     try {
       const names = await invoke<string[]>("get_presets");
@@ -145,13 +187,35 @@ function App() {
     loadDevices();
     loadRoutes();
     loadPresets();
-  }, [loadDevices, loadRoutes, loadPresets]);
+    loadConfig();
+  }, [loadDevices, loadRoutes, loadPresets, loadConfig]);
 
   useEffect(() => {
     if (routes.length > 0) {
       loadDspSettings(routes[0].inputId);
     }
   }, [routes, loadDspSettings]);
+
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const d = await invoke<RuntimeDiagnostics>("get_runtime_diagnostics");
+        if (alive) {
+          setDiagnostics(d);
+          setDiagnosticsUpdatedAt(Date.now());
+        }
+      } catch {
+        // ignore transient diagnostics errors
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, []);
 
   const handleRouteToggle = async (inputId: string, outputId: string) => {
     const existingRoute = routes.find((r) => r.inputId === inputId && r.outputId === outputId);
@@ -412,18 +476,34 @@ function App() {
                   <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
                     <h3 className="text-lg font-semibold mb-3">Input Levels</h3>
                     <div className="space-y-4">
-                      {inputDevices.map((device) => (
-                        <VuMeter key={device.id} level={Math.random() * 60} label={device.name} />
-                      ))}
+                      {inputDevices.map((device) => {
+                        const routeActivity = (diagnostics?.route_signal_activity ?? [])
+                          .filter((r) => r.input_id === device.id);
+                        const recent = routeActivity.filter(
+                          (r) => Date.now() - r.last_activity_ms < staleThresholdSec * 1000
+                        );
+                        const level = recent.length > 0
+                          ? Math.min(60, 10 + recent.reduce((s, r) => s + Math.log10(r.packets + 1), 0) * 8)
+                          : 0;
+                        return <VuMeter key={device.id} level={level} label={device.name} />;
+                      })}
                     </div>
                   </div>
 
                   <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
                     <h3 className="text-lg font-semibold mb-3">Output Levels</h3>
                     <div className="space-y-4">
-                      {outputDevices.map((device) => (
-                        <VuMeter key={device.id} level={Math.random() * 60} label={device.name} />
-                      ))}
+                      {outputDevices.map((device) => {
+                        const routeActivity = (diagnostics?.route_signal_activity ?? [])
+                          .filter((r) => r.output_id === device.id);
+                        const recent = routeActivity.filter(
+                          (r) => Date.now() - r.last_activity_ms < staleThresholdSec * 1000
+                        );
+                        const level = recent.length > 0
+                          ? Math.min(60, 10 + recent.reduce((s, r) => s + Math.log10(r.packets + 1), 0) * 8)
+                          : 0;
+                        return <VuMeter key={device.id} level={level} label={device.name} />;
+                      })}
                     </div>
                   </div>
 
@@ -449,6 +529,73 @@ function App() {
                       <div className="flex justify-between">
                         <span>Active Routes:</span>
                         <span className="text-white">{routes.length}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-semibold">Diagnostics</h3>
+                    <span className="text-xs text-gray-400">
+                      Last updated: {formatLastUpdated(diagnosticsUpdatedAt)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-6 text-sm">
+                    <div>
+                      <div className="text-gray-400 mb-2">Active Capture Sources</div>
+                      <div className="space-y-1 text-white">
+                        {(diagnostics?.active_capture_sources ?? []).length === 0 ? (
+                          <div className="text-gray-500">None</div>
+                        ) : (
+                          diagnostics?.active_capture_sources.map((s) => <div key={s}>{s}</div>)
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 mb-2">Active Output Streams</div>
+                      <div className="space-y-1 text-white">
+                        {(diagnostics?.active_output_streams ?? []).length === 0 ? (
+                          <div className="text-gray-500">None</div>
+                        ) : (
+                          diagnostics?.active_output_streams.map((s) => <div key={s}>{s}</div>)
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-400 mb-2">Per-route Signal Activity</div>
+                      <div className="space-y-2 max-h-40 overflow-auto pr-1">
+                        {(diagnostics?.route_signal_activity ?? []).length === 0 ? (
+                          <div className="text-gray-500">No activity yet</div>
+                        ) : (
+                          diagnostics?.route_signal_activity.slice(0, 8).map((r) => {
+                            const ageSec = Math.max(0, Math.floor((Date.now() - r.last_activity_ms) / 1000));
+                            const isStale = ageSec >= staleThresholdSec;
+                            const isNoSignal = r.packets === 0 || r.samples === 0;
+                            return (
+                            <div
+                              key={r.key}
+                              className={`rounded border p-2 ${
+                                isNoSignal
+                                  ? "border-red-500/70 bg-red-500/10"
+                                  : isStale
+                                  ? "border-amber-500/70 bg-amber-500/10"
+                                  : "border-gray-700"
+                              }`}
+                            >
+                              <div className="text-white">{r.input_id} → {r.output_id}</div>
+                              <div className="text-gray-400">packets: {r.packets} · samples: {r.samples}</div>
+                              <div className={`${isNoSignal ? "text-red-300" : isStale ? "text-amber-300" : "text-gray-500"}`}>
+                                {isNoSignal
+                                  ? "No signal"
+                                  : isStale
+                                  ? `Stale (${ageSec}s ago)`
+                                  : "Active"}
+                              </div>
+                            </div>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
                   </div>
@@ -500,11 +647,30 @@ function App() {
           <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
             <h2 className="text-xl font-semibold mb-4">FX Chain Editor</h2>
             {routes.length > 0 ? (
-              <FxChain
-                routeId={routes[0].inputId}
-                onDspChange={(settings) => handleDspChange(routes[0].inputId, settings)}
-                initialSettings={dspSettings[routes[0].inputId]}
-              />
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">Select Route</label>
+                  <select
+                    value={selectedFxRoute ?? routes[0].inputId}
+                    onChange={(e) => {
+                      setSelectedFxRoute(e.target.value);
+                      loadDspSettings(e.target.value);
+                    }}
+                    className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none"
+                  >
+                    {routes.map((r) => (
+                      <option key={`${r.inputId}-${r.outputId}`} value={r.inputId}>
+                        {r.inputId} → {r.outputId}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <FxChain
+                  routeId={selectedFxRoute ?? routes[0].inputId}
+                  onDspChange={(settings) => handleDspChange(selectedFxRoute ?? routes[0].inputId, settings)}
+                  initialSettings={dspSettings[selectedFxRoute ?? routes[0].inputId]}
+                />
+              </div>
             ) : (
               <p className="text-gray-400">Create a route first to configure its FX chain.</p>
             )}
@@ -543,29 +709,65 @@ function App() {
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Buffer Size</label>
-                <select className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none">
-                  <option value="64">64 samples (lowest latency)</option>
-                  <option value="128">128 samples</option>
-                  <option value="256">256 samples</option>
-                  <option value="512">512 samples (recommended)</option>
-                  <option value="1024">1024 samples</option>
-                  <option value="2048">2048 samples (highest stability)</option>
+                <select
+                  value={config?.buffer_size ?? 512}
+                  onChange={async (e) => {
+                    const next = { ...config!, buffer_size: parseInt(e.target.value, 10) };
+                    setConfig(next);
+                    try { await invoke("update_config", { config: next }); } catch {}
+                  }}
+                  className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none"
+                >
+                  <option value={64}>64 samples (lowest latency)</option>
+                  <option value={128}>128 samples</option>
+                  <option value={256}>256 samples</option>
+                  <option value={512}>512 samples (recommended)</option>
+                  <option value={1024}>1024 samples</option>
+                  <option value={2048}>2048 samples (highest stability)</option>
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Sample Rate</label>
-                <select className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none">
-                  <option value="44100">44.1 kHz</option>
-                  <option value="48000">48 kHz</option>
-                  <option value="96000">96 kHz</option>
+                <select
+                  value={config?.sample_rate ?? 48000}
+                  onChange={async (e) => {
+                    const next = { ...config!, sample_rate: parseInt(e.target.value, 10) };
+                    setConfig(next);
+                    try { await invoke("update_config", { config: next }); } catch {}
+                  }}
+                  className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none"
+                >
+                  <option value={44100}>44.1 kHz</option>
+                  <option value={48000}>48 kHz</option>
+                  <option value={96000}>96 kHz</option>
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Theme</label>
-                <select className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none">
+                <select
+                  value={config?.theme ?? "dark"}
+                  onChange={async (e) => {
+                    const next = { ...config!, theme: e.target.value };
+                    setConfig(next);
+                    try { await invoke("update_config", { config: next }); } catch {}
+                  }}
+                  className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none"
+                >
                   <option value="dark">Dark</option>
                   <option value="light">Light</option>
                   <option value="system">System</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Diagnostics Stale Threshold</label>
+                <select
+                  value={staleThresholdSec}
+                  onChange={(e) => setStaleThresholdSec(parseInt(e.target.value, 10))}
+                  className="w-full px-4 py-2 bg-gray-700 rounded-lg border border-gray-600 focus:border-primary-500 focus:outline-none"
+                >
+                  <option value={3}>3 seconds</option>
+                  <option value={5}>5 seconds</option>
+                  <option value={10}>10 seconds</option>
                 </select>
               </div>
               <div className="flex items-center justify-between">
@@ -573,8 +775,19 @@ function App() {
                   <label className="block text-sm font-medium text-gray-300">Start Minimized</label>
                   <p className="text-xs text-gray-400">Launch application in system tray</p>
                 </div>
-                <button className="w-12 h-6 bg-gray-600 rounded-full relative transition-colors">
-                  <div className="w-5 h-5 bg-white rounded-full absolute top-0.5 left-0.5" />
+                <button
+                  onClick={async () => {
+                    const next = { ...config!, start_minimized: !config?.start_minimized };
+                    setConfig(next);
+                    try { await invoke("update_config", { config: next }); } catch {}
+                  }}
+                  className={`w-12 h-6 rounded-full relative transition-colors ${
+                    config?.start_minimized ? "bg-primary-600" : "bg-gray-600"
+                  }`}
+                >
+                  <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-all ${
+                    config?.start_minimized ? "left-[26px]" : "left-0.5"
+                  }`} />
                 </button>
               </div>
             </div>

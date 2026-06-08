@@ -6,6 +6,7 @@ pub mod dsp;
 pub mod routing;
 
 use audio::AudioEngine;
+use config::AppConfig;
 use devices::DeviceManager;
 use routing::RoutingMatrix;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ pub struct InnerState {
     pub audio_engine: AudioEngine,
     pub routing_matrix: RoutingMatrix,
     pub device_manager: DeviceManager,
+    pub app_config: AppConfig,
 }
 
 #[derive(Clone)]

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Media::Audio::{
@@ -57,6 +58,23 @@ struct RouteRuntime {
     muted: bool,
 }
 
+#[derive(Clone, serde::Serialize)]
+pub struct RouteSignalStats {
+    pub key: String,
+    pub input_id: String,
+    pub output_id: String,
+    pub packets: u64,
+    pub samples: u64,
+    pub last_activity_ms: u64,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct RuntimeDiagnostics {
+    pub active_capture_sources: Vec<String>,
+    pub active_output_streams: Vec<String>,
+    pub route_signal_activity: Vec<RouteSignalStats>,
+}
+
 pub struct AudioEngine {
     host: Host,
     active_captures: Arc<Mutex<HashMap<String, CaptureHandle>>>,
@@ -64,6 +82,7 @@ pub struct AudioEngine {
     routes: Arc<RwLock<Vec<RouteRuntime>>>,
     audio_sender: Sender<(String, Vec<f32>)>,
     dsp_configs: Arc<RwLock<HashMap<String, DspSettings>>>,
+    route_stats: Arc<RwLock<HashMap<String, RouteSignalStats>>>,
 }
 
 impl AudioEngine {
@@ -78,6 +97,7 @@ impl AudioEngine {
             routes: Arc::new(RwLock::new(Vec::new())),
             audio_sender,
             dsp_configs: Arc::new(RwLock::new(HashMap::new())),
+            route_stats: Arc::new(RwLock::new(HashMap::new())),
         };
 
         engine.start_router_worker(audio_receiver);
@@ -245,6 +265,36 @@ impl AudioEngine {
         Ok(self.dsp_configs.read().clone())
     }
 
+    pub fn get_runtime_diagnostics(&self) -> RuntimeDiagnostics {
+        let active_capture_sources = self
+            .active_captures
+            .lock()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let active_output_streams = self
+            .active_outputs
+            .lock()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut route_signal_activity = self
+            .route_stats
+            .read()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        route_signal_activity.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+
+        RuntimeDiagnostics {
+            active_capture_sources,
+            active_output_streams,
+            route_signal_activity,
+        }
+    }
+
     fn resolve_input_device_by_id(&self, device_id: &str) -> Result<Device> {
         if let Some(index_str) = device_id.strip_prefix("mic_") {
             let index = index_str.parse::<usize>()?;
@@ -328,6 +378,7 @@ impl AudioEngine {
     fn start_router_worker(&self, receiver: Receiver<(String, Vec<f32>)>) {
         let routes = self.routes.clone();
         let outputs = self.active_outputs.clone();
+        let route_stats = self.route_stats.clone();
 
         thread::spawn(move || {
             while let Ok((input_id, samples)) = receiver.recv() {
@@ -347,6 +398,26 @@ impl AudioEngine {
                     } else {
                         samples.iter().map(|s| s * route.volume).collect::<Vec<f32>>()
                     };
+
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let key = format!("{}=>{}", route.input_id, route.output_id);
+                    {
+                        let mut stats = route_stats.write();
+                        let entry = stats.entry(key.clone()).or_insert(RouteSignalStats {
+                            key,
+                            input_id: route.input_id.clone(),
+                            output_id: route.output_id.clone(),
+                            packets: 0,
+                            samples: 0,
+                            last_activity_ms: 0,
+                        });
+                        entry.packets = entry.packets.saturating_add(1);
+                        entry.samples = entry.samples.saturating_add(mixed.len() as u64);
+                        entry.last_activity_ms = now_ms;
+                    }
 
                     let _ = sender.try_send(mixed);
                 }

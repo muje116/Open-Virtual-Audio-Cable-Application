@@ -31,6 +31,23 @@ pub struct Preset {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosticsResponse {
+    pub active_capture_sources: Vec<String>,
+    pub active_output_streams: Vec<String>,
+    pub route_signal_activity: Vec<RouteSignalActivity>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RouteSignalActivity {
+    pub key: String,
+    pub input_id: String,
+    pub output_id: String,
+    pub packets: u64,
+    pub samples: u64,
+    pub last_activity_ms: u64,
+}
+
 fn preset_dir() -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     let dir = base.join("vac").join("presets");
@@ -418,6 +435,47 @@ pub async fn import_preset(preset_json: String) -> Result<String, String> {
     let json = serde_json::to_string_pretty(&preset).map_err(|e| e.to_string())?;
     fs::write(&path, json).map_err(|e| e.to_string())?;
     Ok(preset.name)
+}
+
+#[tauri::command]
+pub async fn get_runtime_diagnostics(
+    state: State<'_, crate::AppState>,
+) -> Result<DiagnosticsResponse, String> {
+    let inner = state.inner().0.lock().await;
+    let d = inner.audio_engine.get_runtime_diagnostics();
+    Ok(DiagnosticsResponse {
+        active_capture_sources: d.active_capture_sources,
+        active_output_streams: d.active_output_streams,
+        route_signal_activity: d
+            .route_signal_activity
+            .into_iter()
+            .map(|s| RouteSignalActivity {
+                key: s.key,
+                input_id: s.input_id,
+                output_id: s.output_id,
+                packets: s.packets,
+                samples: s.samples,
+                last_activity_ms: s.last_activity_ms,
+            })
+            .collect(),
+    })
+}
+
+#[tauri::command]
+pub async fn get_config(state: State<'_, crate::AppState>) -> Result<crate::config::AppConfig, String> {
+    let inner = state.inner().0.lock().await;
+    Ok(inner.app_config.clone())
+}
+
+#[tauri::command]
+pub async fn update_config(
+    config: crate::config::AppConfig,
+    state: State<'_, crate::AppState>,
+) -> Result<(), String> {
+    config.save().map_err(|e| e.to_string())?;
+    let mut inner = state.inner().0.lock().await;
+    inner.app_config = config;
+    Ok(())
 }
 
 fn sanitize_filename(name: &str) -> String {
