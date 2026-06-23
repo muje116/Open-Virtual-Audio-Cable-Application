@@ -461,6 +461,29 @@ pub async fn get_runtime_diagnostics(
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioStatus {
+    pub sample_rate: u32,
+    pub buffer_size: u32,
+    pub active_routes: usize,
+    pub estimated_latency_ms: f64,
+}
+
+#[tauri::command]
+pub async fn get_audio_status(state: State<'_, crate::AppState>) -> Result<AudioStatus, String> {
+    let inner = state.inner().0.lock().await;
+    let sr = inner.app_config.sample_rate;
+    let bs = inner.app_config.buffer_size;
+    let routes = inner.routing_matrix.get_all_routes();
+    let latency = (bs as f64 / sr as f64) * 2000.0;
+    Ok(AudioStatus {
+        sample_rate: sr,
+        buffer_size: bs,
+        active_routes: routes.len(),
+        estimated_latency_ms: latency,
+    })
+}
+
 #[tauri::command]
 pub async fn get_config(state: State<'_, crate::AppState>) -> Result<crate::config::AppConfig, String> {
     let inner = state.inner().0.lock().await;

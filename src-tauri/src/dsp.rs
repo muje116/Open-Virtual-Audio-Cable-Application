@@ -270,3 +270,117 @@ impl DspPipeline {
         self.compressor.process(&samples)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dsp_processor_default_no_op() {
+        let p = DspProcessor::default();
+        let input = vec![0.5, -0.3, 0.0, 1.0, -1.0];
+        let output = p.process(&input);
+        assert_eq!(output.len(), input.len());
+        assert!((output[0] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_dsp_processor_mute() {
+        let mut p = DspProcessor::default();
+        p.muted = true;
+        let input = vec![0.5, -0.3];
+        let output = p.process(&input);
+        assert!(output.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn test_dsp_processor_gain() {
+        let mut p = DspProcessor::default();
+        p.gain = 2.0;
+        let input = vec![0.5, -0.3];
+        let output = p.process(&input);
+        assert!((output[0] - 1.0).abs() < 1e-6);
+        assert!((output[1] - (-0.6)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_dsp_processor_clamp() {
+        let mut p = DspProcessor::default();
+        p.gain = 10.0;
+        let input = vec![1.0];
+        let output = p.process(&input);
+        assert!((output[0] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_noise_gate() {
+        let mut p = DspProcessor::default();
+        p.noise_gate_enabled = true;
+        p.noise_gate_threshold = 0.1;
+        let input = vec![0.05, 0.5, 0.01];
+        let output = p.process(&input);
+        assert!((output[0]).abs() < 1e-6);
+        assert!((output[1] - 0.5).abs() < 1e-6);
+        assert!((output[2]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_equalizer_default_no_op() {
+        let eq = Equalizer::default();
+        let input = vec![0.5, -0.3, 0.0];
+        let output = eq.process(&input);
+        assert_eq!(output.len(), input.len());
+    }
+
+    #[test]
+    fn test_compressor_disabled() {
+        let c = Compressor::default();
+        let input = vec![0.5, -0.3];
+        let output = c.process(&input);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_compressor_enabled() {
+        let mut c = Compressor::default();
+        c.enabled = true;
+        c.threshold = -40.0;
+        c.ratio = 10.0;
+        c.attack = 0.5;
+        c.release = 0.5;
+        let input = vec![0.9, 0.8, 0.1];
+        let output = c.process(&input);
+        assert_eq!(output.len(), input.len());
+        assert!(output[0] < input[0]);
+    }
+
+    #[test]
+    fn test_dsp_settings_to_pipeline() {
+        let settings = DspSettings::default();
+        let pipeline = DspPipeline::from_settings(&settings);
+        let input = vec![0.5, -0.3];
+        let output = pipeline.process(&input);
+        assert_eq!(output.len(), 2);
+    }
+
+    #[test]
+    fn test_dsp_pipeline_full_chain() {
+        let settings = DspSettings {
+            gain: 2.0,
+            noise_gate_enabled: true,
+            noise_gate_threshold: -40.0,
+            eq_bands: [1.0, 0.0, 0.0, 0.0, 0.0],
+            compressor_enabled: true,
+            compressor_threshold: -30.0,
+            compressor_ratio: 4.0,
+            compressor_attack: 0.01,
+            compressor_release: 0.1,
+        };
+        let pipeline = DspPipeline::from_settings(&settings);
+        let input = vec![0.5, 0.0, -0.5];
+        let output = pipeline.process(&input);
+        assert_eq!(output.len(), 3);
+        assert!(output[0] > 0.0);
+        assert!((output[1]).abs() < 1e-6);
+    }
+}

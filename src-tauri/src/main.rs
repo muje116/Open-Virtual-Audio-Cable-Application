@@ -47,6 +47,7 @@ async fn main() {
             vac::commands::export_preset,
             vac::commands::import_preset,
             vac::commands::get_runtime_diagnostics,
+            vac::commands::get_audio_status,
             vac::commands::get_config,
             vac::commands::update_config,
         ])
@@ -54,6 +55,13 @@ async fn main() {
             #[cfg(target_os = "macos")]
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
+            let config = AppConfig::load().unwrap_or_default();
+            if config.start_minimized {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
             }
 
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))

@@ -76,6 +76,13 @@ interface AppConfig {
   theme: string;
 }
 
+interface AudioStatus {
+  sample_rate: number;
+  buffer_size: number;
+  active_routes: number;
+  estimated_latency_ms: number;
+}
+
 const formatLastUpdated = (ms: number) => {
   if (!ms) return "never";
   return new Date(ms).toLocaleTimeString();
@@ -96,6 +103,7 @@ function App() {
   const [diagnosticsUpdatedAt, setDiagnosticsUpdatedAt] = useState<number>(0);
   const [staleThresholdSec, setStaleThresholdSec] = useState<number>(5);
   const [config, setConfig] = useState<AppConfig | null>(null);
+  const [audioStatus, setAudioStatus] = useState<AudioStatus | null>(null);
   const [selectedFxRoute, setSelectedFxRoute] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -155,6 +163,15 @@ function App() {
     }
   }, [notify]);
 
+  const loadStatus = useCallback(async () => {
+    try {
+      const s = await invoke<AudioStatus>("get_audio_status");
+      setAudioStatus(s);
+    } catch {
+      // Status not available in mock mode
+    }
+  }, []);
+
   const loadConfig = useCallback(async () => {
     try {
       const cfg = await invoke<AppConfig>("get_config");
@@ -188,13 +205,22 @@ function App() {
     loadRoutes();
     loadPresets();
     loadConfig();
-  }, [loadDevices, loadRoutes, loadPresets, loadConfig]);
+    loadStatus();
+  }, [loadDevices, loadRoutes, loadPresets, loadConfig, loadStatus]);
 
   useEffect(() => {
     if (routes.length > 0) {
       loadDspSettings(routes[0].inputId);
     }
   }, [routes, loadDspSettings]);
+
+  const resolvedTheme = config?.theme === "system"
+    ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
+    : config?.theme ?? "dark";
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", resolvedTheme);
+  }, [resolvedTheme]);
 
   useEffect(() => {
     let alive = true;
@@ -369,6 +395,19 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "m") {
+        e.preventDefault();
+        for (const r of routes) {
+          handleMuteToggle(r.inputId, r.outputId);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
+
   const loopbackActive = routes.some((r) => r.inputId === "loopback_default");
 
   return (
@@ -511,20 +550,16 @@ function App() {
                     <h3 className="text-lg font-semibold mb-3">Status</h3>
                     <div className="space-y-2 text-sm text-gray-400">
                       <div className="flex justify-between">
-                        <span>Latency:</span>
-                        <span className="text-white">5.2 ms</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>CPU Usage:</span>
-                        <span className="text-white">2.3%</span>
+                        <span>Latency (est.):</span>
+                        <span className="text-white">{audioStatus?.estimated_latency_ms.toFixed(1) ?? "—"} ms</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Sample Rate:</span>
-                        <span className="text-white">48000 Hz</span>
+                        <span className="text-white">{audioStatus?.sample_rate ?? "—"} Hz</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Buffer Size:</span>
-                        <span className="text-white">512 samples</span>
+                        <span className="text-white">{audioStatus?.buffer_size ?? "—"} samples</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Active Routes:</span>

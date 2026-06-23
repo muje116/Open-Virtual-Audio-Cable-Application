@@ -122,3 +122,74 @@ impl Default for RoutingMatrix {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add_and_get_route() {
+        let mut matrix = RoutingMatrix::new();
+        let route = matrix.add_route("mic_1".into(), "out_1".into());
+        assert_eq!(route.input_id, "mic_1");
+        assert_eq!(route.output_id, "out_1");
+        assert_eq!(route.volume, 1.0);
+        assert!(!route.muted);
+
+        let all = matrix.get_all_routes();
+        assert_eq!(all.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_route() {
+        let mut matrix = RoutingMatrix::new();
+        let route = matrix.add_route("mic_1".into(), "out_1".into());
+        let removed = matrix.remove_route(&route.id);
+        assert!(removed.is_some());
+        assert!(matrix.get_all_routes().is_empty());
+    }
+
+    #[test]
+    fn test_update_route() {
+        let mut matrix = RoutingMatrix::new();
+        let mut route = matrix.add_route("mic_1".into(), "out_1".into());
+        route.volume = 0.5;
+        route.muted = true;
+        matrix.update_route(route.clone()).unwrap();
+
+        let stored = matrix.get_route(&route.id).unwrap();
+        assert_eq!(stored.volume, 0.5);
+        assert!(stored.muted);
+    }
+
+    #[test]
+    fn test_get_routes_for_input() {
+        let mut matrix = RoutingMatrix::new();
+        matrix.add_route("mic_1".into(), "out_1".into());
+        matrix.add_route("mic_1".into(), "out_2".into());
+        matrix.add_route("mic_2".into(), "out_1".into());
+
+        let routes = matrix.get_routes_for_input("mic_1");
+        assert_eq!(routes.len(), 2);
+
+        let routes = matrix.get_routes_for_input("mic_3");
+        assert_eq!(routes.len(), 0);
+    }
+
+    #[test]
+    fn test_clear() {
+        let mut matrix = RoutingMatrix::new();
+        matrix.add_route("a".into(), "b".into());
+        matrix.add_route("c".into(), "d".into());
+        matrix.clear();
+        assert!(matrix.get_all_routes().is_empty());
+    }
+
+    #[test]
+    fn test_update_nonexistent_route_fails() {
+        let mut matrix = RoutingMatrix::new();
+        let route = Route::default();
+        let result = matrix.update_route(route);
+        assert!(result.is_err());
+    }
+}
